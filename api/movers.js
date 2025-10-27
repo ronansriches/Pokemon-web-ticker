@@ -5,11 +5,17 @@ export default async function handler(req, res) {
     const KEY = process.env.PPT_API_KEY;
     if (!KEY) return res.status(500).json({ error: "Missing PPT_API_KEY env var" });
 
-    // Fetch top movers with a higher limit (e.g. 200)
     const url = "https://www.pokemonpricetracker.com/api/v2/movers?window=24h&limit=200";
+
 
     const r = await fetch(url, { headers: { Authorization: `Bearer ${KEY}` } });
     const text = await r.text();
+    if (!r.ok) {
+  console.error("API error", r.status, text);
+  return res.status(r.status).send(text);
+}
+
+    
     if (!r.ok) return res.status(r.status).send(text);
 
     const raw = JSON.parse(text);
