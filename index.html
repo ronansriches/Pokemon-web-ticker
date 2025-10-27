@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pokémon Card Market Ticker</title>
+<style>
+  body { background:#0b0c10; color:#fff; font-family:Consolas, 'Courier New', monospace; margin:0; }
+  .ticker-wrap { position:fixed; bottom:0; left:0; right:0; background:#101820; border-top:2px solid #222; padding:.5rem 0; overflow:hidden; }
+  .ticker      { display:inline-block; white-space:nowrap; animation:scroll 80s linear infinite; }
+  .ticker-item { display:inline-block; margin:0 2.5rem; }
+  .gain { color:#00ff88; } .loss { color:#ff4c4c; }
+  @keyframes scroll { 0%{transform:translateX(100%)} 100%{transform:translateX(-100%)} }
+  #updated { position:fixed; right:12px; bottom:48px; color:#aaa; font-size:.85rem; }
+</style>
+</head>
+<body>
+
+<div class="ticker-wrap">
+  <div id="ticker" class="ticker">Loading Pokémon market data…</div>
+</div>
+<div id="updated"></div>
+
+<script>
+const API_URL = "/api/movers";       // our backend proxy
+const REFRESH_MS = 5 * 60 * 1000;    // refresh every 5 minutes
+
+function trendIcon(pct){
+  const a=Math.abs(pct);
+  if(a<5) return "🔹";
+  if(a<15) return "🔸";
+  return pct>=0 ? "🚀" : "💀";
+}
+function arrow(pct){ return pct>=0 ? "▲" : "▼"; }
+
+async function fetchData(){
+  try{
+    const r = await fetch(API_URL);
+    const text = await r.text();
+    let json; try{ json = JSON.parse(text); } catch { throw new Error(text); }
+    render(json?.data || []);
+    document.getElementById("updated").textContent =
+      "Last updated " + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }catch(e){
+    console.error(e);
+    document.getElementById("ticker").textContent = "⚠️ Unable to load data.";
+  }
+}
+
+function render(rows){
+  const t = document.createElement("div");
+  t.className = "ticker"; t.id="ticker";
+  rows.forEach(card=>{
+    const name = card.name || "Unknown";
+    const set  = card.set || "Set";
+    const price = Number(card.price || 0);
+    const pct = Number(card.pctChange || 0);
+    const up = pct>=0;
+    const div = document.createElement("div");
+    div.className = "ticker-item " + (up ? "gain" : "loss");
+    div.textContent = `${up?"🔥":"📉"} ${name} (${set}) ${trendIcon(pct)} ${arrow(pct)} ${pct.toFixed(2)}%  $${price.toFixed(2)}`;
+    t.appendChild(div);
+  });
+  document.querySelector(".ticker-wrap").replaceChild(t, document.getElementById("ticker"));
+}
+
+fetchData();
+setInterval(fetchData, REFRESH_MS);
+</script>
+</body>
+</html>
