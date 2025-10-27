@@ -1,39 +1,70 @@
-// Serverless function that calls PokemonPriceTracker and normalizes data for the ticker.
-// Requires Vercel env var: PPT_API_KEY
+// api/movers.js — PokemonPriceTracker v2/cards version
+// Computes "movers" from 7-day history. Requires Vercel env var: PPT_API_KEY.
 
 export default async function handler(req, res) {
   try {
     const KEY = process.env.PPT_API_KEY;
-    if (!KEY) return res.status(500).json({ error: "Missing PPT_API_KEY env var" });
+    if (!KEY) return res.status(500).json({ error: "Missing PPT_API_KEY in Vercel env" });
 
-    // Example endpoint: get top movers (you can switch to weekly/monthly by param)
-    // Docs: refer to PokemonPriceTracker's API; adjust the URL below if needed.
-    const url = "https://api.pokemonpricetracker.com/v1/movers?window=24h&limit=40";
+    // Pull a reasonable slice of pricier cards (fewer zero/blank entries), with 7d history.
+    const params = new URLSearchParams({
+      limit: "60",
+      includeHistory: "true",
+      days: "7",
+      sortBy: "price",        // highest current price first (cheap filter for noise)
+      sortOrder: "desc",
+      minPrice: "5"           // skip $0/$1 noise; tweak if you want
+    });
 
-    const r = await fetch(url, { headers: { "Authorization": `Bearer ${KEY}` } });
+    const url = `https://www.pokemonpricetracker.com/api/v2/cards?${params.toString()}`;
+
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${KEY}` } });
     const text = await r.text();
     if (!r.ok) return res.status(r.status).send(text);
 
-    // Expecting array of movers; each entry should contain card name, set, current price, and change %
-    const raw = JSON.parse(text);
-    // Normalize into { name, set, price, pctChange }
-    const data = (Array.isArray(raw) ? raw : raw.data || [])
-      .map(item => ({
-        name: item.name || item.cardName || "Card",
-        set:  item.set || item.setName || "",
-        price: Number(item.price || item.marketPrice || item.currentPrice || 0),
-        pctChange: Number(item.percentChange || item.changePct || 0)
-      }))
-      // keep only priced rows
-      .filter(x => Number.isFinite(x.price))
-      // biggest absolute movers first
-      .sort((a,b) => Math.abs(b.pctChange) - Math.abs(a.pctChange))
-      .slice(0, 20);
+    // PPT returns an array or {data:[...]} — handle both.
+    const payload = JSON.parse(text);
+    const rows = Array.isArray(payload) ? payload : (payload.data || []);
 
-    // edge cache for 5 minutes
+    // Normalize + compute % change from 7d history when present.
+    const normalized = rows.map(raw => {
+      const name = raw.name || raw.cardName || "Card";
+      const set  = raw.set?.name || raw.setName || raw.setId || "Set";
+
+      // current price – try common fields the docs show
+      // docs show something like { prices: { market: 125.50 } }  :contentReference[oaicite:1]{index=1}
+      const priceNow =
+        Number(raw.prices?.market ?? raw.marketPrice ?? raw.price ?? 0);
+
+      // priceHistory: could be { '2025-10-20': 11.2, ... } or an array; be defensive
+      const histObj = raw.priceHistory || raw.history || null;
+      let histArr = [];
+      if (Array.isArray(histObj)) {
+        histArr = histObj.map(Number).filter(n => Number.isFinite(n));
+      } else if (histObj && typeof histObj === "object") {
+        // sort by key (date) to get oldest -> newest
+        histArr = Object.keys(histObj).sort().map(k => Number(histObj[k]))
+          .filter(n => Number.isFinite(n));
+      }
+
+      const first = histArr.length ? histArr[0] : priceNow;
+      const last  = histArr.length ? histArr[histArr.length - 1] : priceNow;
+      const pct7  = (first && last) ? ((last - first) / first) * 100 : 0;
+
+      return { name, set, price: priceNow, pctChange: pct7, _hist: [first, last] };
+    })
+    // keep only priced rows
+    .filter(x => Number.isFinite(x.price) && x.price > 0);
+
+    // rank by biggest absolute 7d mover
+    normalized.sort((a, b) => Math.abs(b.pctChange) - Math.abs(a.pctChange));
+
+    const data = normalized.slice(0, 20);
+
+    // 5-minute edge cache
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=300");
-    res.json({ data });
+    return res.json({ data });
   } catch (e) {
-    res.status(500).json({ error: "Proxy failed", details: String(e) });
+    return res.status(500).json({ error: "Proxy failed", details: String(e) });
   }
 }
