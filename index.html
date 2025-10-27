@@ -1,71 +1,80 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pokémon Card Market Ticker</title>
-<style>
-  body { background:#0b0c10; color:#fff; font-family:Consolas, 'Courier New', monospace; margin:0; }
-  .ticker-wrap { position:fixed; bottom:0; left:0; right:0; background:#101820; border-top:2px solid #222; padding:.5rem 0; overflow:hidden; }
-  .ticker      { display:inline-block; white-space:nowrap; animation:scroll 80s linear infinite; }
-  .ticker-item { display:inline-block; margin:0 2.5rem; }
-  .gain { color:#00ff88; } .loss { color:#ff4c4c; }
-  @keyframes scroll { 0%{transform:translateX(100%)} 100%{transform:translateX(-100%)} }
-  #updated { position:fixed; right:12px; bottom:48px; color:#aaa; font-size:.85rem; }
-</style>
-</head>
-<body>
-
-<div class="ticker-wrap">
-  <div id="ticker" class="ticker">Loading Pokémon market data…</div>
-</div>
-<div id="updated"></div>
-
 <script>
-const API_URL = "/api/movers";       // our backend proxy
-const REFRESH_MS = 5 * 60 * 1000;    // refresh every 5 minutes
+const API_URL = "/api/movers";
+const REFRESH_MS = 5 * 60 * 1000;
 
-function trendIcon(pct){
-  const a=Math.abs(pct);
-  if(a<5) return "🔹";
-  if(a<15) return "🔸";
-  return pct>=0 ? "🚀" : "💀";
-}
-function arrow(pct){ return pct>=0 ? "▲" : "▼"; }
-
-async function fetchData(){
-  try{
-    const r = await fetch(API_URL);
-    const text = await r.text();
-    let json; try{ json = JSON.parse(text); } catch { throw new Error(text); }
-    render(json?.data || []);
-    document.getElementById("updated").textContent =
-      "Last updated " + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  }catch(e){
-    console.error(e);
+async function fetchData() {
+  try {
+    const res = await fetch(API_URL);
+    const text = await res.text();
+    let json; try { json = JSON.parse(text); } catch { throw new Error(text); }
+    render(json.data || []);
+  } catch (e) {
     document.getElementById("ticker").textContent = "⚠️ Unable to load data.";
+    console.error(e);
   }
 }
 
-function render(rows){
+function render(cards) {
   const t = document.createElement("div");
-  t.className = "ticker"; t.id="ticker";
-  rows.forEach(card=>{
-    const name = card.name || "Unknown";
-    const set  = card.set || "Set";
-    const price = Number(card.price || 0);
-    const pct = Number(card.pctChange || 0);
-    const up = pct>=0;
+  t.className = "ticker"; t.id = "ticker";
+
+  cards.forEach(card => {
     const div = document.createElement("div");
-    div.className = "ticker-item " + (up ? "gain" : "loss");
-    div.textContent = `${up?"🔥":"📉"} ${name} (${set}) ${trendIcon(pct)} ${arrow(pct)} ${pct.toFixed(2)}%  $${price.toFixed(2)}`;
+    div.className = "ticker-item";
+    div.style.cursor = "pointer";
+
+    const emoji = card.pctChange >= 0 ? "🚀" : "💀";
+    const arrow = card.pctChange >= 0 ? "▲" : "▼";
+    const pct = card.pctChange.toFixed(2);
+
+    div.innerHTML = `
+      <img src="${card.image}" width="60" height="84" style="vertical-align:middle; border-radius:4px; margin-right:6px;">
+      ${emoji} <strong>${card.name}</strong> (${card.set}) ${arrow} ${pct}% - $${card.price.toFixed(2)}
+    `;
+
+    div.addEventListener("click", () => showPopup(card));
     t.appendChild(div);
   });
+
   document.querySelector(".ticker-wrap").replaceChild(t, document.getElementById("ticker"));
+}
+
+function showPopup(card) {
+  if (!window.popup) {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.8)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 9999
+    });
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      background: "#1e1e1e", color: "#fff", padding: "20px", borderRadius: "12px",
+      width: "360px", textAlign: "center", fontFamily: "Consolas, monospace"
+    });
+    const img = document.createElement("img");
+    img.style.width = "100%";
+    img.style.borderRadius = "8px";
+    const name = document.createElement("h3");
+    const price = document.createElement("p");
+    const trend = document.createElement("p");
+    const close = document.createElement("button");
+    close.textContent = "Close";
+    close.style.marginTop = "10px";
+    close.onclick = () => overlay.remove();
+
+    box.append(img, name, price, trend, close);
+    overlay.appendChild(box);
+    window.popup = { overlay, img, name, price, trend };
+  }
+
+  window.popup.img.src = card.image;
+  window.popup.name.textContent = card.name;
+  window.popup.price.textContent = `Current Price: $${card.price.toFixed(2)}`;
+  window.popup.trend.textContent = `Change (24h): ${card.pctChange.toFixed(2)}%`;
+  document.body.appendChild(window.popup.overlay);
 }
 
 fetchData();
 setInterval(fetchData, REFRESH_MS);
 </script>
-</body>
-</html>
