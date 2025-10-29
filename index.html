@@ -6,12 +6,12 @@
 <title>Pokémon Card Market Ticker</title>
 <link rel="preconnect" href="https://images.pokemontcg.io">
 <style>
-  :root { --bg:#0b0c10; --panel:#101820; --up:#00ff88; --down:#ff4c4c; --txt:#fff; --muted:#aaa; }
+  :root { --bg:#0b0c10; --panel:#101820; --up:#00ff88; --down:#ff4c4c; --txt:#fff; --muted:#aaa; --speed: 500s; }
   * { box-sizing:border-box }
   body { background:var(--bg); color:var(--txt); font-family:Consolas,'Courier New',monospace; margin:0; }
   .ticker-wrap { position:fixed; left:0; right:0; bottom:0; background:var(--panel); border-top:2px solid #222; padding:.5rem 0; overflow:hidden; }
-  .ticker { display:inline-block; white-space:nowrap; animation:scroll 900s linear infinite; }
-  .ticker-item { display:inline-flex; align-items:center; gap:.5rem; margin:0 1.25rem; cursor:pointer; }  /* was 2rem */
+  .ticker { display:inline-block; white-space:nowrap; animation:scroll var(--speed) linear infinite; }
+  .ticker-item { display:inline-flex; align-items:center; gap:.5rem; margin:0 1.25rem; cursor:pointer; }
   .gain { color:var(--up); } .loss { color:var(--down); }
   @keyframes scroll { 0%{ transform:translateX(100%)} 100%{ transform:translateX(-100%)} }
   #updated { position:fixed; right:12px; bottom:56px; color:var(--muted); font-size:.85rem; }
@@ -35,71 +35,38 @@ const API_URL = "/api/movers?window=24h&limit=200";
 const REFRESH_MS = 5 * 60 * 1000; // 5 minutes
 let LAST_GOOD = [];
 
-function setUpdated(note=""){
-  const el = document.getElementById("updated");
-  if (!el) return;
-  const t = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  el.textContent = `Last updated ${t} ${note}`.trim();
-}
+// ---- helpers ----
+function iconTier(p){ const a=Math.abs(p); if(a<5) return "🔹"; if(a<15) return "🔸"; return p>=0 ? "🚀" : "💀"; }
+function arrow(p){ return p>=0 ? "▲" : "▼"; }
+function setUpdated(note=""){ const el=document.getElementById("updated"); if(!el) return; const t=new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); el.textContent=`Last updated ${t} ${note}`.trim(); }
+function showMessage(msg){ const newT=document.createElement("div"); newT.className="ticker"; newT.id="ticker"; const item=document.createElement("div"); item.className="ticker-item"; item.textContent=msg; newT.appendChild(item); const oldT=document.getElementById("ticker"); (oldT?.parentElement||document.querySelector(".ticker-wrap")).replaceChild(newT, oldT); }
 
-function showMessage(msg) {
-  const wrap = document.querySelector(".ticker-wrap");
-  const newT = document.createElement("div");
-  newT.className = "ticker"; newT.id = "ticker";
-  const item = document.createElement("div");
-  item.className = "ticker-item";
-  item.textContent = msg;
-  newT.appendChild(item);
-  const oldT = document.getElementById("ticker");
-  if (oldT && oldT.parentElement) oldT.parentElement.replaceChild(newT, oldT);
-}
-
-async function fetchData() {
-  try {
+// ---- fetch + render ----
+async function fetchData(){
+  try{
     const r = await fetch(API_URL, { cache: "no-store" });
     const text = await r.text();
     let payload; try { payload = JSON.parse(text); } catch { throw new Error(text); }
     const rows = Array.isArray(payload?.data) ? payload.data : [];
-
-    if (rows.length > 0) {
-      LAST_GOOD = rows;
-      render(rows);
-      setUpdated(`(${rows.length} items)`);
-    } else if (LAST_GOOD.length > 0) {
-      render(LAST_GOOD);
-      setUpdated("(cached)");
-    } else {
-      showMessage("No movers right now.");
-      setUpdated("(empty)");
-    }
-  } catch (e) {
+    if (rows.length > 0) { LAST_GOOD = rows; render(rows); setUpdated(`(${rows.length} items)`); }
+    else if (LAST_GOOD.length > 0) { render(LAST_GOOD); setUpdated("(cached)"); }
+    else { showMessage("No movers right now."); setUpdated("(empty)"); }
+  } catch (e){
     console.error("Front-end fetch error:", e);
-    if (LAST_GOOD.length > 0) {
-      render(LAST_GOOD);
-      setUpdated("(cached after error)");
-    } else {
-      showMessage("⚠️ Unable to load data.");
-      setUpdated("(error)");
-    }
+    if (LAST_GOOD.length > 0) { render(LAST_GOOD); setUpdated("(cached after error)"); }
+    else { showMessage("⚠️ Unable to load data."); setUpdated("(error)"); }
   }
 }
 
-function iconTier(p){ const a=Math.abs(p); if(a<5) return "🔹"; if(a<15) return "🔸"; return p>=0 ? "🚀" : "💀"; }
-function arrow(p){ return p>=0 ? "▲" : "▼"; }
-
 function render(cards){
-  // Duplicate once for seamless scroll
-  const items = [...cards, ...cards];
-
-  const newT = document.createElement("div");
-  newT.className = "ticker"; newT.id = "ticker";
-
-  items.forEach(card => {
+  const items = [...cards, ...cards]; // duplicate for continuous scroll
+  const newT = document.createElement("div"); newT.className="ticker"; newT.id="ticker";
+  items.forEach(card=>{
     const div = document.createElement("div");
-    div.className = "ticker-item " + (Number(card.pctChange||0) >= 0 ? "gain" : "loss");
+    div.className = "ticker-item " + (Number(card.pctChange||0)>=0 ? "gain" : "loss");
     const pct = Number(card.pctChange||0).toFixed(2);
     const price = Number(card.price||0).toFixed(2);
-    const emo = Number(card.pctChange||0) >= 0 ? "🔥" : "📉";
+    const emo = Number(card.pctChange||0)>=0 ? "🔥" : "📉";
     div.innerHTML = `
       <img class="thumb" src="${card.image}" alt="" onerror="this.src='https://via.placeholder.com/48x68?text=%3F'">
       ${emo} <strong>${card.name}</strong> (${card.set})
@@ -108,23 +75,22 @@ function render(cards){
     div.addEventListener("click", () => openPopup(card));
     newT.appendChild(div);
   });
-
   const oldT = document.getElementById("ticker");
-  if (oldT && oldT.parentElement) oldT.parentElement.replaceChild(newT, oldT);
-  else document.querySelector(".ticker-wrap").appendChild(newT);
+  (oldT?.parentElement||document.querySelector(".ticker-wrap")).replaceChild(newT, oldT);
 }
 
+// ---- popup + sparkline ----
 function openPopup(card){
   if(!window.__popup){
-    const ov = document.createElement("div"); ov.className = "overlay";
-    const box = document.createElement("div"); box.className = "cardbox";
-    const x = document.createElement("button"); x.className="closebtn"; x.textContent="✖"; x.onclick=()=>ov.remove();
-    const img = document.createElement("img"); img.className="bigimg";
-    const h3 = document.createElement("h3"); h3.style.margin="10px 0 6px 0";
-    const meta = document.createElement("div"); meta.style.marginBottom="6px";
-    const price = document.createElement("div"); price.style.marginBottom="6px";
-    const change = document.createElement("div"); change.style.marginBottom="6px";
-    const canvas = document.createElement("canvas"); canvas.width=320; canvas.height=120;
+    const ov=document.createElement("div"); ov.className="overlay";
+    const box=document.createElement("div"); box.className="cardbox";
+    const x=document.createElement("button"); x.className="closebtn"; x.textContent="✖"; x.onclick=()=>ov.remove();
+    const img=document.createElement("img"); img.className="bigimg";
+    const h3=document.createElement("h3"); h3.style.margin="10px 0 6px 0";
+    const meta=document.createElement("div"); meta.style.marginBottom="6px";
+    const price=document.createElement("div"); price.style.marginBottom="6px";
+    const change=document.createElement("div"); change.style.marginBottom="6px";
+    const canvas=document.createElement("canvas"); canvas.width=320; canvas.height=120;
     box.append(x,img,h3,meta,price,change,canvas); ov.appendChild(box);
     ov.addEventListener("click", e=>{ if(e.target===ov) ov.remove(); });
     document.addEventListener("keydown", e=>{ if(e.key==="Escape") ov.remove(); });
@@ -141,43 +107,32 @@ function openPopup(card){
   drawSpark(ctx, canvas.width, canvas.height, toHistory(card), pct>=0);
   document.body.appendChild(ov);
 }
-
 function toHistory(card){
   let arr = Array.isArray(card.history) ? card.history.map(Number).filter(Number.isFinite) : [];
   if(arr.length >= 2) return arr;
-  const now = Number(card.price||0);
-  const pct = Number(card.pctChange||0);
+  const now = Number(card.price||0), pct = Number(card.pctChange||0);
   if(Number.isFinite(now) && Number.isFinite(pct) && pct !== -100){
     const prev = now / (1 + pct/100);
     arr = [prev, now];
   } else arr = [now, now];
   return arr;
 }
-
 function drawSpark(ctx, w, h, data, isUp){
   ctx.clearRect(0,0,w,h);
   if(!data || data.length < 2) return;
-  const min = Math.min(...data), max = Math.max(...data);
-  const y = v => h - ((v - min)/((max - min)||1))*h;
-
-  ctx.beginPath();
-  ctx.moveTo(0, y(data[0]));
+  const min=Math.min(...data), max=Math.max(...data);
+  const y=v=> h - ((v - min)/((max - min)||1))*h;
+  ctx.beginPath(); ctx.moveTo(0, y(data[0]));
   data.forEach((v,i)=> ctx.lineTo((i/(data.length-1))*w, y(v)));
-  ctx.strokeStyle = isUp ? "#00ff88" : "#ff4c4c";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  const grad = ctx.createLinearGradient(0,0,0,h);
-  grad.addColorStop(0, isUp ? "rgba(0,255,136,.18)" : "rgba(255,76,76,.18)");
-  grad.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = grad;
-  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = isUp ? "#00ff88" : "#ff4c4c"; ctx.lineWidth = 2; ctx.stroke();
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0, isUp ? "rgba(0,255,136,.18)" : "rgba(255,76,76,.18)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle=g; ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath(); ctx.fill();
 }
 
 fetchData();
 setInterval(fetchData, REFRESH_MS);
 </script>
-
-
 </body>
 </html>
