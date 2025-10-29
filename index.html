@@ -32,94 +32,92 @@
 
 <script>
 const API_URL = "/api/movers?window=24h&limit=200";
-const REFRESH_MS = 5 * 60 * 1000;
+const REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+let LAST_GOOD = [];
 
-let LAST_GOOD = [];  // cache last non-empty dataset
+function setUpdated(note=""){
+  const el = document.getElementById("updated");
+  if (!el) return;
+  const t = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  el.textContent = `Last updated ${t} ${note}`.trim();
+}
 
-async function fetchData(){
-  try{
+function showMessage(msg) {
+  const wrap = document.querySelector(".ticker-wrap");
+  const newT = document.createElement("div");
+  newT.className = "ticker"; newT.id = "ticker";
+  const item = document.createElement("div");
+  item.className = "ticker-item";
+  item.textContent = msg;
+  newT.appendChild(item);
+  const oldT = document.getElementById("ticker");
+  if (oldT && oldT.parentElement) oldT.parentElement.replaceChild(newT, oldT);
+}
+
+async function fetchData() {
+  try {
     const r = await fetch(API_URL, { cache: "no-store" });
     const text = await r.text();
-    let json; try { json = JSON.parse(text); } catch { throw new Error(text); }
-    const rows = Array.isArray(json?.data) ? json.data : [];
+    let payload; try { payload = JSON.parse(text); } catch { throw new Error(text); }
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+
     if (rows.length > 0) {
       LAST_GOOD = rows;
       render(rows);
+      setUpdated(`(${rows.length} items)`);
     } else if (LAST_GOOD.length > 0) {
-      // keep showing previous data instead of going blank
-      render(LAST_GOOD, true);
+      render(LAST_GOOD);
+      setUpdated("(cached)");
     } else {
-      showEmpty();
+      showMessage("No movers right now.");
+      setUpdated("(empty)");
     }
-    stamp();
   } catch (e) {
     console.error("Front-end fetch error:", e);
     if (LAST_GOOD.length > 0) {
-      render(LAST_GOOD, true);
-      stamp("(cached)");
+      render(LAST_GOOD);
+      setUpdated("(cached after error)");
     } else {
-      showEmpty("⚠️ Unable to load data.");
+      showMessage("⚠️ Unable to load data.");
+      setUpdated("(error)");
     }
   }
-}
-
-function stamp(note){
-  const el = document.getElementById("updated");
-  el.textContent = "Last updated " + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) + (note ? " " + note : "");
-}
-
-function showEmpty(msg="No movers right now."){
-  const t = document.createElement("div");
-  t.className = "ticker"; t.id = "ticker";
-  const div = document.createElement("div");
-  div.className = "ticker-item";
-  div.textContent = msg;
-  t.appendChild(div);
-  document.querySelector(".ticker-wrap").replaceChild(t, document.getElementById("ticker"));
 }
 
 function iconTier(p){ const a=Math.abs(p); if(a<5) return "🔹"; if(a<15) return "🔸"; return p>=0 ? "🚀" : "💀"; }
 function arrow(p){ return p>=0 ? "▲" : "▼"; }
 
-function render(cards, cached=false){
-  // If you want to suppress tiny moves visually, do it here:
-  const visible = cards.filter(c => Math.abs(Number(c.pctChange||0)) >= 0.1);
-  // Duplicate to create a continuous loop look
-  const items = [...visible, ...visible];
+function render(cards){
+  // Duplicate once for seamless scroll
+  const items = [...cards, ...cards];
 
-  const t = document.createElement("div");
-  t.className = "ticker"; t.id = "ticker";
+  const newT = document.createElement("div");
+  newT.className = "ticker"; newT.id = "ticker";
 
-  items.forEach(card=>{
+  items.forEach(card => {
     const div = document.createElement("div");
-    div.className = "ticker-item " + (card.pctChange>=0 ? "gain" : "loss");
-
+    div.className = "ticker-item " + (Number(card.pctChange||0) >= 0 ? "gain" : "loss");
     const pct = Number(card.pctChange||0).toFixed(2);
     const price = Number(card.price||0).toFixed(2);
-    const emo = card.pctChange>=0 ? "🔥" : "📉";
-
+    const emo = Number(card.pctChange||0) >= 0 ? "🔥" : "📉";
     div.innerHTML = `
       <img class="thumb" src="${card.image}" alt="" onerror="this.src='https://via.placeholder.com/48x68?text=%3F'">
-      ${emo} <strong>${card.name}</strong> (${card.set}) ${iconTier(card.pctChange)} ${arrow(card.pctChange)} ${pct}% — $${price}
+      ${emo} <strong>${card.name}</strong> (${card.set})
+      ${iconTier(Number(card.pctChange||0))} ${arrow(Number(card.pctChange||0))} ${pct}% — $${price}
     `;
     div.addEventListener("click", () => openPopup(card));
-    t.appendChild(div);
+    newT.appendChild(div);
   });
 
-  if (items.length === 0) {
-    showEmpty(cached ? "No new movers (showing cached)" : "No movers right now.");
-    return;
-  }
-
-  document.querySelector(".ticker-wrap").replaceChild(t, document.getElementById("ticker"));
+  const oldT = document.getElementById("ticker");
+  if (oldT && oldT.parentElement) oldT.parentElement.replaceChild(newT, oldT);
+  else document.querySelector(".ticker-wrap").appendChild(newT);
 }
 
 function openPopup(card){
   if(!window.__popup){
-    const ov = document.createElement("div");
-    ov.className = "overlay";
-    const box = document.createElement("div");
-    box.className = "cardbox";
+    const ov = document.createElement("div"); ov.className = "overlay";
+    const box = document.createElement("div"); box.className = "cardbox";
     const x = document.createElement("button"); x.className="closebtn"; x.textContent="✖"; x.onclick=()=>ov.remove();
     const img = document.createElement("img"); img.className="bigimg";
     const h3 = document.createElement("h3"); h3.style.margin="10px 0 6px 0";
@@ -133,7 +131,6 @@ function openPopup(card){
     window.__popup = { ov, img, h3, meta, price, change, canvas, ctx: canvas.getContext("2d") };
   }
   const { ov, img, h3, meta, price, change, canvas, ctx } = window.__popup;
-
   img.src = card.image;
   h3.textContent = card.name;
   meta.textContent = card.set || "";
@@ -141,7 +138,6 @@ function openPopup(card){
   const pct = Number(card.pctChange||0);
   change.textContent = `Change (24h): ${pct>=0 ? "▲" : "▼"} ${pct.toFixed(2)}%`;
   change.style.color = pct>=0 ? "#00ff88" : "#ff4c4c";
-
   drawSpark(ctx, canvas.width, canvas.height, toHistory(card), pct>=0);
   document.body.appendChild(ov);
 }
@@ -181,6 +177,7 @@ function drawSpark(ctx, w, h, data, isUp){
 fetchData();
 setInterval(fetchData, REFRESH_MS);
 </script>
+
 
 </body>
 </html>
