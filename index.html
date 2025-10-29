@@ -31,36 +31,65 @@
   <div id="updated"></div>
 
 <script>
-const API_URL = "/api/movers?window=24h&limit=200"; // backend proxy
-const REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+const API_URL = "/api/movers?window=24h&limit=200";
+const REFRESH_MS = 5 * 60 * 1000;
 
-function iconTier(p){ const a=Math.abs(p); if(a<5) return "🔹"; if(a<15) return "🔸"; return p>=0 ? "🚀" : "💀"; }
-function arrow(p){ return p>=0 ? "▲" : "▼"; }
+let LAST_GOOD = [];  // cache last non-empty dataset
 
 async function fetchData(){
   try{
     const r = await fetch(API_URL, { cache: "no-store" });
     const text = await r.text();
     let json; try { json = JSON.parse(text); } catch { throw new Error(text); }
-    render(json.data || []);
+    const rows = Array.isArray(json?.data) ? json.data : [];
+    if (rows.length > 0) {
+      LAST_GOOD = rows;
+      render(rows);
+    } else if (LAST_GOOD.length > 0) {
+      // keep showing previous data instead of going blank
+      render(LAST_GOOD, true);
+    } else {
+      showEmpty();
+    }
     stamp();
-  }catch(e){
+  } catch (e) {
     console.error("Front-end fetch error:", e);
-    document.getElementById("ticker").textContent = "⚠️ Unable to load data.";
+    if (LAST_GOOD.length > 0) {
+      render(LAST_GOOD, true);
+      stamp("(cached)");
+    } else {
+      showEmpty("⚠️ Unable to load data.");
+    }
   }
 }
 
-function stamp(){
-  let el = document.getElementById("updated");
-  el.textContent = "Last updated " + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+function stamp(note){
+  const el = document.getElementById("updated");
+  el.textContent = "Last updated " + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) + (note ? " " + note : "");
 }
 
-function render(cards){
-  // Duplicate the row once to create a seamless long scroll if many items
-  const items = [...cards, ...cards];
+function showEmpty(msg="No movers right now."){
+  const t = document.createElement("div");
+  t.className = "ticker"; t.id = "ticker";
+  const div = document.createElement("div");
+  div.className = "ticker-item";
+  div.textContent = msg;
+  t.appendChild(div);
+  document.querySelector(".ticker-wrap").replaceChild(t, document.getElementById("ticker"));
+}
+
+function iconTier(p){ const a=Math.abs(p); if(a<5) return "🔹"; if(a<15) return "🔸"; return p>=0 ? "🚀" : "💀"; }
+function arrow(p){ return p>=0 ? "▲" : "▼"; }
+
+function render(cards, cached=false){
+  // If you want to suppress tiny moves visually, do it here:
+  const visible = cards.filter(c => Math.abs(Number(c.pctChange||0)) >= 0.1);
+  // Duplicate to create a continuous loop look
+  const items = [...visible, ...visible];
 
   const t = document.createElement("div");
-  t.className = "ticker"; t.id="ticker";
+  t.className = "ticker"; t.id = "ticker";
+
   items.forEach(card=>{
     const div = document.createElement("div");
     div.className = "ticker-item " + (card.pctChange>=0 ? "gain" : "loss");
@@ -76,6 +105,11 @@ function render(cards){
     div.addEventListener("click", () => openPopup(card));
     t.appendChild(div);
   });
+
+  if (items.length === 0) {
+    showEmpty(cached ? "No new movers (showing cached)" : "No movers right now.");
+    return;
+  }
 
   document.querySelector(".ticker-wrap").replaceChild(t, document.getElementById("ticker"));
 }
@@ -113,7 +147,6 @@ function openPopup(card){
 }
 
 function toHistory(card){
-  // Prefer API history if present; else synthesize from previous/current.
   let arr = Array.isArray(card.history) ? card.history.map(Number).filter(Number.isFinite) : [];
   if(arr.length >= 2) return arr;
   const now = Number(card.price||0);
@@ -148,5 +181,6 @@ function drawSpark(ctx, w, h, data, isUp){
 fetchData();
 setInterval(fetchData, REFRESH_MS);
 </script>
+
 </body>
 </html>
