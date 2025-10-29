@@ -1,43 +1,39 @@
-// api/movers.js — resilient PPT proxy: multi-window fallback + never-blank output
+// api/movers.js — resilient PPT proxy: multi-window fallback + computed % + demo fallback
 export default async function handler(req, res) {
   try {
     const KEY = process.env.PPT_API_KEY;
 
-    // If no key set, keep your stream/site alive with demo data
+    // No key? Keep your site/stream alive with demo data.
     if (!KEY) return res.json({ data: demoData() });
 
-    const requestedWindow = (req.query.window || "24h").toString(); // 24h | 7d | 30d
+    const requestedWindow = String(req.query.window || "24h"); // 24h | 7d | 30d
     const limit = Number(req.query.limit || 200);
 
-    // Try a few windows in order until we get non-empty data
     const windows = [requestedWindow, "7d", "30d"];
     let data = [];
 
     for (const win of windows) {
-      // Try v2 then v1 shapes (some accounts expose one or the other)
       const candidates = [
         `https://www.pokemonpricetracker.com/api/v2/movers?window=${win}&limit=${limit}`,
-        `https://www.pokemonpricetracker.com/api/movers?window=${win}&limit=${limit}`,
+        `https://www.pokemonpricetracker.com/api/movers?window=${win}&limit=${limit}`
       ];
 
+      let got = [];
       for (const url of candidates) {
         const r = await fetch(url, { headers: { Authorization: `Bearer ${KEY}` } });
         const txt = await r.text();
 
         if (!r.ok) {
-          // Log upstream error snippet but keep trying other candidates/windows
-          console.error("PPT upstream error:", r.status, txt.slice(0, 240));
+          console.error("PPT upstream error:", r.status, txt.slice(0,240));
           continue;
         }
 
         let payload;
         try { payload = JSON.parse(txt); } catch { payload = txt; }
-
         const list = Array.isArray(payload?.data) ? payload.data :
                      Array.isArray(payload) ? payload : [];
 
-        const normalized = list
-          // keep anything with a numeric price
+        got = list
           .filter(x => Number(x.price || x.marketPrice || x.currentPrice) > 0)
           .map(x => {
             const current = Number(x.price || x.marketPrice || x.currentPrice || 0);
@@ -67,20 +63,14 @@ export default async function handler(req, res) {
                        : (prev ? [prev, current] : [current]),
             };
           })
-          // DO NOT filter tiny moves here; the UI can decide what to show
-          .sort((a, b) => Math.abs(b.pctChange) - Math.abs(a.pctChange))
+          .sort((a,b) => Math.abs(b.pctChange) - Math.abs(a.pctChange))
           .slice(0, limit);
 
-        if (normalized.length > 0) {
-          data = normalized;
-          break; // got data for this window
-        }
+        if (got.length > 0) break;
       }
-
-      if (data.length > 0) break; // stop if we found anything
+      if (got.length > 0) { data = got; break; }
     }
 
-    // If still empty, serve demo (prevents a blank ticker)
     if (data.length === 0) data = demoData();
 
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=300");
@@ -91,7 +81,8 @@ export default async function handler(req, res) {
   }
 }
 
-function demoData() {
+// Demo payload (guarantees visible UI even if API is down/misconfigured)
+function demoData(){
   const seed = [
     { name:"Charizard ex", set:"Obsidian Flames", price:118.5, pctChange:32.2, image:"https://images.pokemontcg.io/sv3/125.png" },
     { name:"Gardevoir ex", set:"Scarlet & Violet", price:42.1, pctChange:-18.4, image:"https://images.pokemontcg.io/sv1/86.png" },
@@ -99,11 +90,11 @@ function demoData() {
     { name:"Pikachu", set:"Celebrations", price:3.2, pctChange:-9.1, image:"https://images.pokemontcg.io/cel25/5.png" },
   ];
   const out = [];
-  for (let i = 0; i < 25; i++) {
-    out.push(...seed.map((c, k) => ({
+  for (let i=0;i<25;i++) {
+    out.push(...seed.map((c,k)=>({
       ...c,
-      id: `demo-${i}-${k}`,
-      history: [c.price / (1 + c.pctChange / 100), c.price]
+      id:`demo-${i}-${k}`,
+      history:[c.price/(1+c.pctChange/100), c.price]
     })));
   }
   return out;
