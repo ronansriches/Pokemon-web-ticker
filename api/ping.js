@@ -1,4 +1,4 @@
-// quick health check: proves your deployment and routing are alive
+// quick health check to confirm routing works
 export default function handler(req, res) {
   res.status(200).json({ ok: true, now: new Date().toISOString() });
 }
